@@ -1,6 +1,8 @@
 # ytviewer
 YouTube TUI that pulls subscriptions from YouTube API and plays videos in MPV
 
+![ytviewer demo](https://github.com/fabean/ytviewer/raw/main/ytviewer.gif)
+
 ## Overview
 
 ytviewer is a terminal-based YouTube subscription viewer built in Go using the Bubble Tea framework. It allows you to:
@@ -30,7 +32,6 @@ go build -o ytviewer cmd/ytviewer/main.go
 # Optional: Install system-wide
 go install ./cmd/ytviewer
 ```
-
 ## Configuration
 
 ytviewer requires a configuration file at `~/.config/ytviewer/config.json` with the following structure:
@@ -91,4 +92,5 @@ ytviewer
 - The YouTube Data API has quotas (10,000 units per day for free tier)
 - Different API operations consume different amounts of quota
 - The application requires a valid YouTube API key and at least one channel ID in the config file to work
+
 
