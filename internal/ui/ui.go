@@ -1,0 +1,223 @@
+package ui
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/fabean/ytviewer/internal/youtube"
+)
+
+// Replace with your actual module path
+// import "github.com/fabean/ytviewer/internal/youtube"
+
+// Model represents the UI state
+type Model struct {
+	list         list.Model
+	youtubeClient *youtube.Client
+	videos       []youtube.Video
+	loading      bool
+	spinner      spinner.Model
+	err          error
+	width        int
+	height       int
+}
+
+// Item represents a video in the list
+type Item struct {
+	video youtube.Video
+}
+
+// FilterValue implements list.Item interface
+func (i Item) FilterValue() string {
+	return i.video.Title
+}
+
+// Title returns the item title
+func (i Item) Title() string {
+	return i.video.Title
+}
+
+// Description returns the item description
+func (i Item) Description() string {
+	timeAgo := formatTimeAgo(i.video.PublishedAt)
+	return fmt.Sprintf("%s • %s", 
+		channelStyle.Render(i.video.ChannelName),
+		dateStyle.Render(timeAgo))
+}
+
+// formatTimeAgo formats the time difference in a human-readable way
+func formatTimeAgo(t time.Time) string {
+	now := time.Now()
+	diff := now.Sub(t)
+
+	switch {
+	case diff < time.Minute:
+		return "just now"
+	case diff < time.Hour:
+		mins := int(diff.Minutes())
+		return fmt.Sprintf("%d minute%s ago", mins, pluralize(mins))
+	case diff < 24*time.Hour:
+		hours := int(diff.Hours())
+		return fmt.Sprintf("%d hour%s ago", hours, pluralize(hours))
+	case diff < 30*24*time.Hour:
+		days := int(diff.Hours() / 24)
+		return fmt.Sprintf("%d day%s ago", days, pluralize(days))
+	default:
+		return t.Format("Jan 2, 2006")
+	}
+}
+
+// pluralize returns "s" if n != 1
+func pluralize(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+// NewModel creates a new UI model
+func NewModel(client *youtube.Client) Model {
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+
+	delegate := list.NewDefaultDelegate()
+	delegate.Styles.SelectedTitle = selectedItemStyle
+	delegate.Styles.SelectedDesc = selectedItemStyle
+
+	l := list.New([]list.Item{}, delegate, 0, 0)
+	l.Title = "YouTube Subscriptions"
+	l.Styles.Title = titleStyle
+	l.Styles.PaginationStyle = statusBarStyle
+	l.Styles.HelpStyle = statusBarStyle
+
+	return Model{
+		list:         l,
+		youtubeClient: client,
+		loading:      true,
+		spinner:      s,
+	}
+}
+
+// Init initializes the model
+func (m Model) Init() tea.Cmd {
+	return tea.Batch(
+		m.spinner.Tick,
+		m.fetchVideos(),
+	)
+}
+
+// fetchVideos fetches videos from YouTube
+func (m Model) fetchVideos() tea.Cmd {
+	return func() tea.Msg {
+		// Get channel IDs from the config instead of hardcoding them
+		channelIDs := m.youtubeClient.GetSubscribedChannels()
+		
+		videos, err := m.youtubeClient.GetLatestVideos(channelIDs, 10)
+		if err != nil {
+			return errMsg{err}
+		}
+		
+		return videosMsg{videos}
+	}
+}
+
+// Update handles UI updates
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		m.list.SetSize(msg.Width, msg.Height-4)
+
+	case tea.KeyMsg:
+		switch {
+		case key.Matches(msg, key.NewBinding(key.WithKeys("q", "ctrl+c"))):
+			return m, tea.Quit
+
+		case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
+			if m.list.SelectedItem() != nil {
+				selectedItem := m.list.SelectedItem().(Item)
+				return m, func() tea.Msg {
+					err := m.youtubeClient.PlayVideo(selectedItem.video.ID)
+					if err != nil {
+						return errMsg{err}
+					}
+					return nil
+				}
+			}
+		}
+
+	case videosMsg:
+		m.videos = msg.videos
+		m.loading = false
+		
+		// Convert videos to list items
+		items := make([]list.Item, len(m.videos))
+		for i, video := range m.videos {
+			items[i] = Item{video: video}
+		}
+		
+		m.list.SetItems(items)
+
+	case errMsg:
+		m.err = msg.err
+		m.loading = false
+
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		cmds = append(cmds, cmd)
+	}
+
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	cmds = append(cmds, cmd)
+
+	return m, tea.Batch(cmds...)
+}
+
+// View renders the UI
+func (m Model) View() string {
+	if m.err != nil {
+		return fmt.Sprintf("Error: %v\nPress q to quit.", m.err)
+	}
+
+	if m.loading {
+		return lipgloss.Place(
+			m.width,
+			m.height,
+			lipgloss.Center,
+			lipgloss.Center,
+			lipgloss.JoinVertical(
+				lipgloss.Center,
+				m.spinner.View()+" Loading videos...",
+				"",
+				"Press q to quit",
+			),
+		)
+	}
+
+	return listStyle.Render(m.list.View())
+}
+
+// Message types
+type videosMsg struct {
+	videos []youtube.Video
+}
+
+type errMsg struct {
+	err error
+}
+
+func (e errMsg) Error() string {
+	return e.err.Error()
+} 
