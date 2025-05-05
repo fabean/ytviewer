@@ -46,6 +46,8 @@ type Client struct {
 		MarkAsWatched  bool
 	}
 	cachedSubscriptions []Subscription // Add this field for caching
+	channelCache        map[string]string // Map of channel ID to channel name
+	apiKey              string // Add this field to store the API key
 }
 
 // NewClient creates a new YouTube client
@@ -60,6 +62,8 @@ func NewClient(apiKey string, subscribedChannels []string, maxVideos int64, mpvO
 		service:            service,
 		subscribedChannels: subscribedChannels,
 		maxVideosPerChannel: maxVideos,
+		channelCache:        make(map[string]string),
+		apiKey:              apiKey, // Store the API key
 	}
 	
 	// Set MPV options if provided
@@ -345,4 +349,82 @@ func (c *Client) AddSubscription(channelID string) error {
 	}
 	
 	return nil
+}
+
+// GetChannelName fetches the name of a channel
+func (c *Client) GetChannelName(channelID string) (string, error) {
+	// Check if the channel name is in the cache
+	if name, ok := c.channelCache[channelID]; ok {
+		return name, nil
+	}
+	
+	// If not in cache, fetch from API
+	service, err := youtube.NewService(context.Background(), option.WithAPIKey(c.apiKey))
+	if err != nil {
+		return "", fmt.Errorf("error creating YouTube service: %w", err)
+	}
+	
+	call := service.Channels.List([]string{"snippet"}).Id(channelID)
+	response, err := call.Do()
+	if err != nil {
+		return "", fmt.Errorf("error fetching channel: %w", err)
+	}
+	
+	if len(response.Items) == 0 {
+		return "", fmt.Errorf("channel not found")
+	}
+	
+	// Store in cache and return
+	channelName := response.Items[0].Snippet.Title
+	c.channelCache[channelID] = channelName
+	return channelName, nil
+}
+
+// GetSubscribedChannelNames fetches all subscribed channel names
+func (c *Client) GetSubscribedChannelNames() (map[string]string, error) {
+	result := make(map[string]string)
+	var missingChannels []string
+	
+	// Check which channels we need to fetch
+	for _, channelID := range c.subscribedChannels {
+		if name, ok := c.channelCache[channelID]; ok {
+			result[channelID] = name
+		} else {
+			missingChannels = append(missingChannels, channelID)
+		}
+	}
+	
+	// If all channels are cached, return immediately
+	if len(missingChannels) == 0 {
+		return result, nil
+	}
+	
+	// Fetch missing channels in batches to reduce API calls
+	service, err := youtube.NewService(context.Background(), option.WithAPIKey(c.apiKey))
+	if err != nil {
+		return result, fmt.Errorf("error creating YouTube service: %w", err)
+	}
+	
+	// Process in batches of 50 (YouTube API limit)
+	for i := 0; i < len(missingChannels); i += 50 {
+		end := i + 50
+		if end > len(missingChannels) {
+			end = len(missingChannels)
+		}
+		
+		batch := missingChannels[i:end]
+		call := service.Channels.List([]string{"snippet"}).Id(strings.Join(batch, ","))
+		response, err := call.Do()
+		if err != nil {
+			return result, fmt.Errorf("error fetching channels: %w", err)
+		}
+		
+		// Add to cache and result
+		for _, item := range response.Items {
+			c.channelCache[item.Id] = item.Snippet.Title
+			result[item.Id] = item.Snippet.Title
+		}
+	}
+	
+	return result, nil
 } 

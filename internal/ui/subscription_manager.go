@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -11,6 +12,27 @@ import (
 
 	"github.com/fabean/ytviewer/internal/youtube"
 )
+
+// SubscriptionItem represents a channel subscription
+type SubscriptionItem struct {
+	ID   string
+	Name string
+}
+
+// FilterValue implements list.Item interface
+func (i SubscriptionItem) FilterValue() string {
+	return i.Name
+}
+
+// Title returns the item title
+func (i SubscriptionItem) Title() string {
+	return i.Name
+}
+
+// Description returns the item description
+func (i SubscriptionItem) Description() string {
+	return i.ID
+}
 
 // SubscriptionModel represents the subscription manager UI state
 type SubscriptionModel struct {
@@ -68,17 +90,33 @@ func NewSubscriptionModel(client *youtube.Client) SubscriptionModel {
 func (m SubscriptionModel) Init() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
-		m.fetchSubscriptions(),
+		m.loadSubscriptions(),
 	)
 }
 
-// fetchSubscriptions fetches channel information for subscriptions
-func (m SubscriptionModel) fetchSubscriptions() tea.Cmd {
+// loadSubscriptions fetches channel information for subscriptions
+func (m SubscriptionModel) loadSubscriptions() tea.Cmd {
 	return func() tea.Msg {
-		subscriptions, err := m.youtubeClient.GetSubscriptionInfo()
+		// Get channel names with caching
+		channelNames, err := m.youtubeClient.GetSubscribedChannelNames()
 		if err != nil {
 			return errMsg{err}
 		}
+		
+		// Create subscription objects
+		subscriptions := make([]youtube.Subscription, 0, len(channelNames))
+		for id, name := range channelNames {
+			subscriptions = append(subscriptions, youtube.Subscription{
+				ID:    id,
+				Title: name,
+				// Other fields can be left with zero values
+			})
+		}
+		
+		// Sort subscriptions by name
+		sort.Slice(subscriptions, func(i, j int) bool {
+			return subscriptions[i].Title < subscriptions[j].Title
+		})
 		
 		return subscriptionsMsg{subscriptions: subscriptions}
 	}
@@ -342,12 +380,6 @@ func (m SubscriptionModel) View() string {
 	for i, sub := range visibleSubs {
 		idx := i + startIdx
 		
-		// Format subscriber count
-		subCount := "Unknown"
-		if sub.SubscriberCount > 0 {
-			subCount = formatNumber(sub.SubscriberCount) + " subscribers"
-		}
-		
 		// Style based on selection
 		var line string
 		if idx == m.cursor {
@@ -358,12 +390,7 @@ func (m SubscriptionModel) View() string {
 				Background(lipgloss.Color("57")).
 				Render(sub.Title)
 				
-			subscriberInfo := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("205")).
-				Background(lipgloss.Color("57")).
-				Render(subCount)
-				
-			line = fmt.Sprintf("> %s - %s", channelName, subscriberInfo)
+			line = fmt.Sprintf("> %s", channelName)
 		} else {
 			// Normal style
 			channelName := lipgloss.NewStyle().
@@ -371,11 +398,7 @@ func (m SubscriptionModel) View() string {
 				Foreground(lipgloss.Color("205")).
 				Render(sub.Title)
 				
-			subscriberInfo := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("240")).
-				Render(subCount)
-				
-			line = fmt.Sprintf("  %s - %s", channelName, subscriberInfo)
+			line = fmt.Sprintf("  %s", channelName)
 		}
 		
 		sb.WriteString(line)
