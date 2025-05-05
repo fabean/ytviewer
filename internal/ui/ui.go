@@ -94,10 +94,20 @@ func NewModel(client *youtube.Client) Model {
 	l := list.New([]list.Item{}, delegate, 0, 0)
 	l.Title = "YouTube Subscriptions"
 	l.Styles.Title = titleStyle
-	l.Styles.PaginationStyle = statusBarStyle
-	l.Styles.HelpStyle = statusBarStyle
+	
+	// Use the same style for both pagination and help
+	statusStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFFDF5")).
+		Background(lipgloss.Color("#25A065"))
+	
+	l.Styles.PaginationStyle = statusStyle
+	l.Styles.HelpStyle = statusStyle
+	
+	// Make sure the pagination dots use the same style
+	l.Styles.ActivePaginationDot = statusStyle.Copy()
+	l.Styles.InactivePaginationDot = statusStyle.Copy()
 
-	// Add custom keybindings
+	// Add custom keybindings for subscription management and video playback
 	l.AdditionalFullHelpKeys = func() []key.Binding {
 		return []key.Binding{
 			key.NewBinding(
