@@ -10,6 +10,7 @@ ytviewer is a terminal-based YouTube subscription viewer built in Go using the B
 - View the latest videos from your subscribed channels
 - Play videos directly in MPV with optimized settings
 - Navigate your subscriptions with a simple keyboard interface
+- Manage your subscriptions directly through the TUI
 
 ## Installation
 
@@ -78,7 +79,19 @@ ytviewer
 
 - `↑`/`↓`: Navigate through videos
 - `Enter`: Play selected video in MPV
+- `s`: Open subscription management screen
 - `q`: Quit the application
+
+### Managing Subscriptions
+
+Press `s` from the main screen to access the subscription management interface. From there, you can:
+
+- View all your current subscriptions
+- Add new subscriptions by entering a channel ID
+- Remove existing subscriptions
+- Return to the main video list
+
+Changes to subscriptions are automatically saved to your config file.
 
 ## Features
 
@@ -86,6 +99,7 @@ ytviewer
 - Displays video titles, channel names, and publish dates
 - Plays videos in MPV with optimized settings (1080p max resolution)
 - Simple, keyboard-driven interface
+- Manage subscriptions directly through the TUI
 
 ## Notes
 
