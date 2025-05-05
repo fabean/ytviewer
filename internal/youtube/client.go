@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -229,6 +230,11 @@ func (c *Client) GetSubscriptionInfo() ([]Subscription, error) {
 			Thumbnail:       thumbnail,
 		})
 	}
+
+	// Sort subscriptions alphabetically by title
+	sort.Slice(subscriptions, func(i, j int) bool {
+		return strings.ToLower(subscriptions[i].Title) < strings.ToLower(subscriptions[j].Title)
+	})
 
 	// Cache the subscription info
 	c.cachedSubscriptions = subscriptions
