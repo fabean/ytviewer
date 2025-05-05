@@ -92,11 +92,11 @@ type CustomDelegate struct {
 
 // Render overrides the default render method to add a bullet for selected items
 func (d CustomDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
-	// Add bullet or space at the beginning
+	// Add bullet or space at the beginning with reduced spacing
 	if index == m.Index() {
-		fmt.Fprint(w, d.bulletStyle.Render("● "))
+		fmt.Fprint(w, d.bulletStyle.Render("●"))
 	} else {
-		fmt.Fprint(w, "  ")
+		fmt.Fprint(w, " ")
 	}
 	
 	// Get the item
@@ -123,7 +123,7 @@ func (d CustomDelegate) Render(w io.Writer, m list.Model, index int, listItem li
 			desc = d.Styles.NormalDesc.Render(desc)
 		}
 		// Add the same indentation for the description line
-		fmt.Fprintf(w, "  %s", desc)
+		fmt.Fprintf(w, " %s", desc)
 	}
 	// No extra newline at the end - let the list handle spacing
 }
