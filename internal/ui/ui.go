@@ -123,6 +123,10 @@ func NewModel(client *youtube.Client) Model {
 				key.WithKeys("r"),
 				key.WithHelp("r", "reload videos"),
 			),
+			key.NewBinding(
+				key.WithKeys("f"),
+				key.WithHelp("f", "force reload (clear cache)"),
+			),
 		}
 	}
 
@@ -176,7 +180,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return subModel, subModel.Init()
 
 		case key.Matches(msg, key.NewBinding(key.WithKeys("r"))):
-			// Reload videos
+			// Regular reload (uses cache if valid)
+			m.loading = true
+			return m, tea.Batch(
+				m.spinner.Tick,
+				m.fetchVideos(),
+			)
+			
+		case key.Matches(msg, key.NewBinding(key.WithKeys("f"))):
+			// Force reload (clear cache)
+			m.youtubeClient.ClearVideoCache()
 			m.loading = true
 			return m, tea.Batch(
 				m.spinner.Tick,

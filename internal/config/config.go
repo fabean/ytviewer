@@ -7,17 +7,18 @@ import (
 	"path/filepath"
 )
 
-// Config holds the application configuration
+// Config represents the application configuration
 type Config struct {
 	APIKey        string   `json:"api_key"`
 	Subscriptions []string `json:"subscriptions"` // YouTube channel IDs
-	MaxVideos     int64    `json:"max_videos_per_channel"`
+	MaxVideos     int64    `json:"max_videos"`
 	MPVOptions    struct {
 		MaxResolution  string `json:"max_resolution"`
-		HardwareAccel  bool   `json:"hardware_acceleration"`
+		HardwareAccel  bool   `json:"hardware_accel"`
 		CacheSize      string `json:"cache_size"`
 		MarkAsWatched  bool   `json:"mark_as_watched"`
 	} `json:"mpv_options"`
+	CacheDuration int `json:"cache_duration"` // Cache duration in minutes
 }
 
 // LoadConfig loads the configuration from the config file
@@ -44,6 +45,16 @@ func LoadConfig() (*Config, error) {
 	var config Config
 	if err := json.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("error parsing config file: %w", err)
+	}
+
+	// Set default values if not specified
+	if config.MaxVideos == 0 {
+		config.MaxVideos = 10
+	}
+	
+	// Set default cache duration to 30 minutes if not specified
+	if config.CacheDuration == 0 {
+		config.CacheDuration = 30
 	}
 
 	return &config, nil
@@ -74,7 +85,7 @@ func createDefaultConfig(configDir string) (*Config, error) {
 		MaxVideos:     10,
 		MPVOptions: struct {
 			MaxResolution  string `json:"max_resolution"`
-			HardwareAccel  bool   `json:"hardware_acceleration"`
+			HardwareAccel  bool   `json:"hardware_accel"`
 			CacheSize      string `json:"cache_size"`
 			MarkAsWatched  bool   `json:"mark_as_watched"`
 		}{
@@ -83,6 +94,7 @@ func createDefaultConfig(configDir string) (*Config, error) {
 			CacheSize:      "150M",
 			MarkAsWatched:  true,
 		},
+		CacheDuration: 30,
 	}
 
 	// Create config file

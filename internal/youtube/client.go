@@ -13,6 +13,7 @@ import (
 
 	"google.golang.org/api/option"
 	"google.golang.org/api/youtube/v3"
+	"github.com/google/uuid"
 )
 
 // Video represents a YouTube video
@@ -47,11 +48,14 @@ type Client struct {
 	}
 	cachedSubscriptions []Subscription // Add this field for caching
 	channelCache        map[string]string // Map of channel ID to channel name
+	videoCache          map[string][]Video // Map of channel ID to videos
+	lastFetchTime       time.Time // When we last fetched videos
+	cacheDuration       time.Duration // How long to cache videos for
 	apiKey              string // Add this field to store the API key
 }
 
 // NewClient creates a new YouTube client
-func NewClient(apiKey string, subscribedChannels []string, maxVideos int64, mpvOptions interface{}) (*Client, error) {
+func NewClient(apiKey string, subscribedChannels []string, maxVideos int64, mpvOptions interface{}, cacheDuration int) (*Client, error) {
 	ctx := context.Background()
 	service, err := youtube.NewService(ctx, option.WithAPIKey(apiKey))
 	if err != nil {
@@ -63,6 +67,9 @@ func NewClient(apiKey string, subscribedChannels []string, maxVideos int64, mpvO
 		subscribedChannels: subscribedChannels,
 		maxVideosPerChannel: maxVideos,
 		channelCache:        make(map[string]string),
+		videoCache:          make(map[string][]Video),
+		lastFetchTime:       time.Time{}, // Zero time
+		cacheDuration:       time.Duration(cacheDuration) * time.Minute,
 		apiKey:              apiKey, // Store the API key
 	}
 	
@@ -88,67 +95,50 @@ func (c *Client) GetSubscribedChannels() []string {
 
 // GetLatestVideos fetches the latest videos from the subscribed channels
 func (c *Client) GetLatestVideos() ([]Video, error) {
-	var videos []Video
-
-	for _, channelID := range c.subscribedChannels {
-		// Get channel info to get the uploads playlist ID
-		channelResponse, err := c.service.Channels.List([]string{"contentDetails", "snippet"}).
-			Id(channelID).
-			MaxResults(1).
-			Do()
-		if err != nil {
-			return nil, fmt.Errorf("error fetching channel info: %w", err)
+	// Check if cache is still valid
+	if !c.lastFetchTime.IsZero() && time.Since(c.lastFetchTime) < c.cacheDuration {
+		// Combine all videos from cache
+		var allVideos []Video
+		for _, videos := range c.videoCache {
+			allVideos = append(allVideos, videos...)
 		}
-
-		if len(channelResponse.Items) == 0 {
-			continue
-		}
-
-		channelName := channelResponse.Items[0].Snippet.Title
-		uploadsPlaylistID := channelResponse.Items[0].ContentDetails.RelatedPlaylists.Uploads
-
-		// Get videos from the uploads playlist
-		playlistResponse, err := c.service.PlaylistItems.List([]string{"snippet", "contentDetails"}).
-			PlaylistId(uploadsPlaylistID).
-			MaxResults(c.maxVideosPerChannel).
-			Do()
-		if err != nil {
-			return nil, fmt.Errorf("error fetching playlist items: %w", err)
-		}
-
-		for _, item := range playlistResponse.Items {
-			publishedAt, _ := time.Parse(time.RFC3339, item.Snippet.PublishedAt)
-			
-			thumbnail := ""
-			if thumbnails := item.Snippet.Thumbnails; thumbnails != nil {
-				if thumbnails.Medium != nil {
-					thumbnail = thumbnails.Medium.Url
-				} else if thumbnails.Default != nil {
-					thumbnail = thumbnails.Default.Url
-				}
-			}
-
-			videos = append(videos, Video{
-				ID:          item.Snippet.ResourceId.VideoId,
-				Title:       item.Snippet.Title,
-				ChannelName: channelName,
-				PublishedAt: publishedAt,
-				Thumbnail:   thumbnail,
-			})
-		}
+		
+		// Sort by publish date (newest first)
+		sort.Slice(allVideos, func(i, j int) bool {
+			return allVideos[i].PublishedAt.After(allVideos[j].PublishedAt)
+		})
+		
+		return allVideos, nil
 	}
-
-	// Sort videos by published date (newest first)
-	// This is a simple implementation; you might want to improve it
-	for i := 0; i < len(videos); i++ {
-		for j := i + 1; j < len(videos); j++ {
-			if videos[i].PublishedAt.Before(videos[j].PublishedAt) {
-				videos[i], videos[j] = videos[j], videos[i]
-			}
+	
+	// Cache expired or not initialized, fetch new videos
+	allVideos := make([]Video, 0)
+	
+	// Process channels in batches to reduce API calls
+	for i := 0; i < len(c.subscribedChannels); i += 50 {
+		end := i + 50
+		if end > len(c.subscribedChannels) {
+			end = len(c.subscribedChannels)
 		}
+		
+		batch := c.subscribedChannels[i:end]
+		batchVideos, err := c.fetchVideosForChannels(batch)
+		if err != nil {
+			return nil, err
+		}
+		
+		allVideos = append(allVideos, batchVideos...)
 	}
-
-	return videos, nil
+	
+	// Sort by publish date (newest first)
+	sort.Slice(allVideos, func(i, j int) bool {
+		return allVideos[i].PublishedAt.After(allVideos[j].PublishedAt)
+	})
+	
+	// Update cache timestamp
+	c.lastFetchTime = time.Now()
+	
+	return allVideos, nil
 }
 
 // PlayVideo opens the video in MPV with optimized settings
@@ -427,4 +417,182 @@ func (c *Client) GetSubscribedChannelNames() (map[string]string, error) {
 	}
 	
 	return result, nil
+}
+
+// Add a new method to fetch videos for multiple channels at once
+func (c *Client) fetchVideosForChannels(channelIDs []string) ([]Video, error) {
+	var allVideos []Video
+	
+	// First, get all channel uploads playlist IDs in one API call
+	service, err := youtube.NewService(context.Background(), option.WithAPIKey(c.apiKey))
+	if err != nil {
+		return nil, fmt.Errorf("error creating YouTube service: %w", err)
+	}
+	
+	// Get channel details (including uploads playlist ID) in one API call
+	channelsCall := service.Channels.List([]string{"contentDetails"}).Id(strings.Join(channelIDs, ","))
+	channelsResponse, err := channelsCall.Do()
+	if err != nil {
+		return nil, fmt.Errorf("error fetching channels: %w", err)
+	}
+	
+	// Process each channel's uploads playlist
+	for _, channel := range channelsResponse.Items {
+		channelID := channel.Id
+		uploadsPlaylistID := channel.ContentDetails.RelatedPlaylists.Uploads
+		
+		// Fetch videos from uploads playlist
+		playlistCall := service.PlaylistItems.List([]string{"snippet"}).
+			PlaylistId(uploadsPlaylistID).
+			MaxResults(c.maxVideosPerChannel)
+		
+		playlistResponse, err := playlistCall.Do()
+		if err != nil {
+			// Log error but continue with other channels
+			fmt.Printf("Error fetching videos for channel %s: %v\n", channelID, err)
+			continue
+		}
+		
+		// Process videos
+		channelVideos := make([]Video, 0, len(playlistResponse.Items))
+		for _, item := range playlistResponse.Items {
+			// Get channel name from cache if available
+			channelName, ok := c.channelCache[channelID]
+			if !ok {
+				// If not in cache, use channel ID temporarily
+				// We'll populate it later with the batch channel name fetch
+				channelName = channelID
+			}
+			
+			// Parse the published time
+			publishedAt, err := time.Parse(time.RFC3339, item.Snippet.PublishedAt)
+			if err != nil {
+				// Use current time as fallback
+				publishedAt = time.Now()
+			}
+			
+			video := Video{
+				ID:          item.Snippet.ResourceId.VideoId,
+				Title:       item.Snippet.Title,
+				ChannelName: channelName,
+				PublishedAt: publishedAt,
+				Thumbnail:   item.Snippet.Thumbnails.Medium.Url,
+			}
+			
+			channelVideos = append(channelVideos, video)
+		}
+		
+		// Update video cache for this channel
+		c.videoCache[channelID] = channelVideos
+		allVideos = append(allVideos, channelVideos...)
+	}
+	
+	// Now fetch any missing channel names in a single batch request
+	var missingChannelIDs []string
+	channelIDToVideos := make(map[string][]int) // Map channel ID to indices in allVideos
+	
+	for i, video := range allVideos {
+		if video.ChannelName == video.ChannelName { // This is always true, but we need to check if it's a channel ID
+			// Check if the channel name is actually a channel ID
+			if _, err := uuid.Parse(video.ChannelName); err == nil || strings.HasPrefix(video.ChannelName, "UC") {
+				missingChannelIDs = append(missingChannelIDs, video.ChannelName)
+				indices := channelIDToVideos[video.ChannelName]
+				channelIDToVideos[video.ChannelName] = append(indices, i)
+			}
+		}
+	}
+	
+	// Deduplicate missing channel IDs
+	missingChannelIDsMap := make(map[string]bool)
+	for _, id := range missingChannelIDs {
+		missingChannelIDsMap[id] = true
+	}
+	
+	missingChannelIDs = make([]string, 0, len(missingChannelIDsMap))
+	for id := range missingChannelIDsMap {
+		missingChannelIDs = append(missingChannelIDs, id)
+	}
+	
+	// Fetch missing channel names if needed
+	if len(missingChannelIDs) > 0 {
+		channelNames, err := c.GetChannelNamesForIDs(missingChannelIDs)
+		if err != nil {
+			// Log error but continue with channel IDs as names
+			fmt.Printf("Error fetching channel names: %v\n", err)
+		} else {
+			// Update videos with channel names
+			for channelID, indices := range channelIDToVideos {
+				if name, ok := channelNames[channelID]; ok {
+					// Update all videos for this channel
+					for _, idx := range indices {
+						allVideos[idx].ChannelName = name
+					}
+					
+					// Also update in video cache
+					if videos, ok := c.videoCache[channelID]; ok {
+						for i := range videos {
+							c.videoCache[channelID][i].ChannelName = name
+						}
+					}
+				}
+			}
+		}
+	}
+	
+	return allVideos, nil
+}
+
+// Add a method to get multiple channel names at once
+func (c *Client) GetChannelNamesForIDs(channelIDs []string) (map[string]string, error) {
+	result := make(map[string]string)
+	var missingChannels []string
+	
+	// Check which channels we need to fetch
+	for _, channelID := range channelIDs {
+		if name, ok := c.channelCache[channelID]; ok {
+			result[channelID] = name
+		} else {
+			missingChannels = append(missingChannels, channelID)
+		}
+	}
+	
+	// If all channels are cached, return immediately
+	if len(missingChannels) == 0 {
+		return result, nil
+	}
+	
+	// Fetch missing channels in batches to reduce API calls
+	service, err := youtube.NewService(context.Background(), option.WithAPIKey(c.apiKey))
+	if err != nil {
+		return result, fmt.Errorf("error creating YouTube service: %w", err)
+	}
+	
+	// Process in batches of 50 (YouTube API limit)
+	for i := 0; i < len(missingChannels); i += 50 {
+		end := i + 50
+		if end > len(missingChannels) {
+			end = len(missingChannels)
+		}
+		
+		batch := missingChannels[i:end]
+		call := service.Channels.List([]string{"snippet"}).Id(strings.Join(batch, ","))
+		response, err := call.Do()
+		if err != nil {
+			return result, fmt.Errorf("error fetching channels: %w", err)
+		}
+		
+		// Add to cache and result
+		for _, item := range response.Items {
+			c.channelCache[item.Id] = item.Snippet.Title
+			result[item.Id] = item.Snippet.Title
+		}
+	}
+	
+	return result, nil
+}
+
+// ClearVideoCache clears the video cache to force a fresh fetch
+func (c *Client) ClearVideoCache() {
+	c.videoCache = make(map[string][]Video)
+	c.lastFetchTime = time.Time{} // Zero time
 } 
