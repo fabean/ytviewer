@@ -97,6 +97,20 @@ func NewModel(client *youtube.Client) Model {
 	l.Styles.PaginationStyle = statusBarStyle
 	l.Styles.HelpStyle = statusBarStyle
 
+	// Add custom keybindings
+	l.AdditionalFullHelpKeys = func() []key.Binding {
+		return []key.Binding{
+			key.NewBinding(
+				key.WithKeys("s"),
+				key.WithHelp("s", "manage subscriptions"),
+			),
+			key.NewBinding(
+				key.WithKeys("enter"),
+				key.WithHelp("enter", "play video"),
+			),
+		}
+	}
+
 	return Model{
 		list:         l,
 		youtubeClient: client,
@@ -116,10 +130,8 @@ func (m Model) Init() tea.Cmd {
 // fetchVideos fetches videos from YouTube
 func (m Model) fetchVideos() tea.Cmd {
 	return func() tea.Msg {
-		// Get channel IDs from the config instead of hardcoding them
-		channelIDs := m.youtubeClient.GetSubscribedChannels()
-		
-		videos, err := m.youtubeClient.GetLatestVideos(channelIDs, 10)
+		// Updated call without parameters
+		videos, err := m.youtubeClient.GetLatestVideos()
 		if err != nil {
 			return errMsg{err}
 		}
@@ -142,6 +154,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("q", "ctrl+c"))):
 			return m, tea.Quit
+
+		case key.Matches(msg, key.NewBinding(key.WithKeys("s"))):
+			// Switch to subscription manager
+			subModel := NewSubscriptionModel(m.youtubeClient)
+			return subModel, subModel.Init()
 
 		case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
 			if m.list.SelectedItem() != nil {

@@ -11,6 +11,7 @@ import (
 type Config struct {
 	APIKey        string   `json:"api_key"`
 	Subscriptions []string `json:"subscriptions"` // YouTube channel IDs
+	MaxVideos     int64    `json:"max_videos_per_channel"`
 	MPVOptions    struct {
 		MaxResolution  string `json:"max_resolution"`
 		HardwareAccel  bool   `json:"hardware_acceleration"`
@@ -70,6 +71,7 @@ func createDefaultConfig(configDir string) (*Config, error) {
 	config := &Config{
 		APIKey:        "YOUR_YOUTUBE_API_KEY",
 		Subscriptions: []string{},
+		MaxVideos:     10,
 		MPVOptions: struct {
 			MaxResolution  string `json:"max_resolution"`
 			HardwareAccel  bool   `json:"hardware_acceleration"`

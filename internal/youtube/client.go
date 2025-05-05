@@ -2,8 +2,11 @@ package youtube
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,20 +23,32 @@ type Video struct {
 	Thumbnail   string
 }
 
+// Subscription represents a YouTube channel subscription
+type Subscription struct {
+	ID              string
+	Title           string
+	Description     string
+	SubscriberCount uint64
+	VideoCount      uint64
+	Thumbnail       string
+}
+
 // Client handles YouTube API interactions
 type Client struct {
-	service           *youtube.Service
+	service            *youtube.Service
 	subscribedChannels []string
-	mpvOptions        struct {
+	maxVideosPerChannel int64
+	mpvOptions         struct {
 		MaxResolution  string
 		HardwareAccel  bool
 		CacheSize      string
 		MarkAsWatched  bool
 	}
+	cachedSubscriptions []Subscription // Add this field for caching
 }
 
 // NewClient creates a new YouTube client
-func NewClient(apiKey string, subscribedChannels []string, mpvOptions interface{}) (*Client, error) {
+func NewClient(apiKey string, subscribedChannels []string, maxVideos int64, mpvOptions interface{}) (*Client, error) {
 	ctx := context.Background()
 	service, err := youtube.NewService(ctx, option.WithAPIKey(apiKey))
 	if err != nil {
@@ -41,8 +56,9 @@ func NewClient(apiKey string, subscribedChannels []string, mpvOptions interface{
 	}
 
 	client := &Client{
-		service:           service,
+		service:            service,
 		subscribedChannels: subscribedChannels,
+		maxVideosPerChannel: maxVideos,
 	}
 	
 	// Set MPV options if provided
@@ -66,10 +82,10 @@ func (c *Client) GetSubscribedChannels() []string {
 }
 
 // GetLatestVideos fetches the latest videos from the subscribed channels
-func (c *Client) GetLatestVideos(channelIDs []string, maxResults int64) ([]Video, error) {
+func (c *Client) GetLatestVideos() ([]Video, error) {
 	var videos []Video
 
-	for _, channelID := range channelIDs {
+	for _, channelID := range c.subscribedChannels {
 		// Get channel info to get the uploads playlist ID
 		channelResponse, err := c.service.Channels.List([]string{"contentDetails", "snippet"}).
 			Id(channelID).
@@ -89,7 +105,7 @@ func (c *Client) GetLatestVideos(channelIDs []string, maxResults int64) ([]Video
 		// Get videos from the uploads playlist
 		playlistResponse, err := c.service.PlaylistItems.List([]string{"snippet", "contentDetails"}).
 			PlaylistId(uploadsPlaylistID).
-			MaxResults(maxResults).
+			MaxResults(c.maxVideosPerChannel).
 			Do()
 		if err != nil {
 			return nil, fmt.Errorf("error fetching playlist items: %w", err)
@@ -156,4 +172,171 @@ func (c *Client) PlayVideo(videoID string) error {
 	}
 	
 	return err
+}
+
+// GetSubscriptionInfo fetches detailed information about subscribed channels
+func (c *Client) GetSubscriptionInfo() ([]Subscription, error) {
+	// Check if we have cached subscription info
+	if len(c.cachedSubscriptions) > 0 {
+		return c.cachedSubscriptions, nil
+	}
+
+	// Check if there are any subscriptions
+	if len(c.subscribedChannels) == 0 {
+		return nil, fmt.Errorf("no subscriptions found")
+	}
+
+	var subscriptions []Subscription
+
+	for _, channelID := range c.subscribedChannels {
+		// Create a context with timeout for each request
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		
+		// Get channel info
+		channelResponse, err := c.service.Channels.List([]string{"snippet", "statistics"}).
+			Id(channelID).
+			Context(ctx).
+			Do()
+			
+		// Cancel the context after the request is done
+		cancel()
+			
+		if err != nil {
+			return nil, fmt.Errorf("error fetching channel info: %w", err)
+		}
+
+		if len(channelResponse.Items) == 0 {
+			continue
+		}
+
+		channel := channelResponse.Items[0]
+		
+		thumbnail := ""
+		if thumbnails := channel.Snippet.Thumbnails; thumbnails != nil {
+			if thumbnails.Medium != nil {
+				thumbnail = thumbnails.Medium.Url
+			} else if thumbnails.Default != nil {
+				thumbnail = thumbnails.Default.Url
+			}
+		}
+
+		subscriptions = append(subscriptions, Subscription{
+			ID:              channelID,
+			Title:           channel.Snippet.Title,
+			Description:     channel.Snippet.Description,
+			SubscriberCount: uint64(channel.Statistics.SubscriberCount),
+			VideoCount:      uint64(channel.Statistics.VideoCount),
+			Thumbnail:       thumbnail,
+		})
+	}
+
+	// Cache the subscription info
+	c.cachedSubscriptions = subscriptions
+	
+	return subscriptions, nil
+}
+
+// RemoveSubscription removes a channel from subscriptions
+func (c *Client) RemoveSubscription(channelID string) error {
+	// Find the index of the channel to remove
+	index := -1
+	for i, id := range c.subscribedChannels {
+		if id == channelID {
+			index = i
+			break
+		}
+	}
+
+	if index == -1 {
+		return fmt.Errorf("channel not found in subscriptions")
+	}
+
+	// Remove the channel from the list
+	c.subscribedChannels = append(c.subscribedChannels[:index], c.subscribedChannels[index+1:]...)
+	
+	// Clear the cache
+	c.cachedSubscriptions = nil
+	
+	// Update the config file
+	return c.saveSubscriptions()
+}
+
+// saveSubscriptions saves the updated subscription list to the config file
+func (c *Client) saveSubscriptions() error {
+	// Get config directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("error getting home directory: %w", err)
+	}
+
+	configDir := filepath.Join(homeDir, ".config", "ytviewer")
+	configPath := filepath.Join(configDir, "config.json")
+	
+	// Read existing config
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("error reading config file: %w", err)
+	}
+
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		return fmt.Errorf("error parsing config file: %w", err)
+	}
+	
+	// Update subscriptions
+	config["subscriptions"] = c.subscribedChannels
+	
+	// Write updated config
+	updatedData, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("error creating updated config: %w", err)
+	}
+
+	if err := os.WriteFile(configPath, updatedData, 0644); err != nil {
+		return fmt.Errorf("error writing updated config: %w", err)
+	}
+	
+	return nil
+}
+
+// AddSubscription adds a new channel to the subscriptions
+func (c *Client) AddSubscription(channelID string) error {
+	// Validate the channel ID
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	
+	// Check if the channel exists
+	channelResponse, err := c.service.Channels.List([]string{"snippet"}).
+		Id(channelID).
+		Context(ctx).
+		Do()
+		
+	if err != nil {
+		return fmt.Errorf("error checking channel: %w", err)
+	}
+	
+	if len(channelResponse.Items) == 0 {
+		return fmt.Errorf("channel not found")
+	}
+	
+	// Check if already subscribed
+	for _, subID := range c.subscribedChannels {
+		if subID == channelID {
+			return fmt.Errorf("already subscribed to this channel")
+		}
+	}
+	
+	// Add to subscriptions
+	c.subscribedChannels = append(c.subscribedChannels, channelID)
+	
+	// Clear the cache so it will be refreshed
+	c.cachedSubscriptions = nil
+	
+	// Save to config file
+	err = c.saveSubscriptions()
+	if err != nil {
+		return fmt.Errorf("error saving config: %w", err)
+	}
+	
+	return nil
 } 
