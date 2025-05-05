@@ -147,8 +147,8 @@ func NewModel(client *youtube.Client) Model {
 		DefaultDelegate: defaultDelegate,
 		bulletStyle:     bulletStyle,
 	}
-	// Set spacing to 0 to make the list more compact
-	delegate.SetSpacing(0)
+	// Set spacing to 1 to add space between items
+	delegate.SetSpacing(1)
 
 	l := list.New([]list.Item{}, delegate, 0, 0)
 	l.Title = "YouTube Subscriptions"
