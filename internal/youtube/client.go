@@ -158,7 +158,7 @@ func (c *Client) PlayVideo(videoID string) error {
 	cmd := exec.Command("mpv", args...)
 	
 	// For debugging: print the command being executed
-	fmt.Printf("Executing: mpv %s\n", strings.Join(args, " "))
+	// fmt.Printf("Executing: mpv %s\n", strings.Join(args, " "))
 	
 	// Start MPV
 	err := cmd.Start()
