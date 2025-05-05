@@ -351,4 +351,4 @@ func (m Model) ReturnFromSubscriptions() tea.Cmd {
 		m.spinner.Tick,
 		m.fetchVideos(),
 	)
-} 
+}

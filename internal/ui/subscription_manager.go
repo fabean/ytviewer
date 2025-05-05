@@ -377,27 +377,23 @@ func (m SubscriptionModel) View() string {
 	sb.WriteString("\n\n")
 	
 	// Subscriptions
+	bulletStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#25A065"))
+	
+	// Use the same channelStyle that's defined in ui.go
+	// This ensures consistency across the application
+	
 	for i, sub := range visibleSubs {
 		idx := i + startIdx
 		
 		// Style based on selection
 		var line string
 		if idx == m.cursor {
-			// Selected style
-			channelName := lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("205")).
-				Background(lipgloss.Color("57")).
-				Render(sub.Title)
-				
-			line = fmt.Sprintf("> %s", channelName)
+			// Selected style with bullet
+			channelName := channelStyle.Render(sub.Title)
+			line = fmt.Sprintf("%s %s", bulletStyle.Render("●"), channelName)
 		} else {
-			// Normal style
-			channelName := lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("205")).
-				Render(sub.Title)
-				
+			// Normal style with space for alignment
+			channelName := channelStyle.Render(sub.Title)
 			line = fmt.Sprintf("  %s", channelName)
 		}
 		
