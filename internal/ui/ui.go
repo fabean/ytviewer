@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -83,16 +84,71 @@ func pluralize(n int) string {
 	return "s"
 }
 
+// CustomDelegate extends the default delegate with custom rendering
+type CustomDelegate struct {
+	list.DefaultDelegate
+	bulletStyle lipgloss.Style
+}
+
+// Render overrides the default render method to add a bullet for selected items
+func (d CustomDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
+	// Add bullet or space at the beginning
+	if index == m.Index() {
+		fmt.Fprint(w, d.bulletStyle.Render("● "))
+	} else {
+		fmt.Fprint(w, "  ")
+	}
+	
+	// Get the item
+	item, ok := listItem.(Item)
+	if !ok {
+		return
+	}
+	
+	// Render title with proper styling
+	title := item.Title()
+	if index == m.Index() {
+		title = d.Styles.SelectedTitle.Render(title)
+	} else {
+		title = d.Styles.NormalTitle.Render(title)
+	}
+	fmt.Fprintln(w, title)
+	
+	// Render description with proper indentation and styling
+	desc := item.Description()
+	if desc != "" {
+		if index == m.Index() {
+			desc = d.Styles.SelectedDesc.Render(desc)
+		} else {
+			desc = d.Styles.NormalDesc.Render(desc)
+		}
+		// Add the same indentation for the description line
+		fmt.Fprintf(w, "  %s", desc)
+	}
+	// No extra newline at the end - let the list handle spacing
+}
+
 // NewModel creates a new UI model
 func NewModel(client *youtube.Client) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 
-	// Create a default delegate without trying to override the Render function
-	delegate := list.NewDefaultDelegate()
-	delegate.Styles.SelectedTitle = selectedItemStyle
-	delegate.Styles.SelectedDesc = selectedItemStyle
+	// Create a default delegate
+	defaultDelegate := list.NewDefaultDelegate()
+	
+	// Remove highlighting from selected items
+	defaultDelegate.Styles.SelectedTitle = defaultDelegate.Styles.NormalTitle.Copy()
+	defaultDelegate.Styles.SelectedDesc = defaultDelegate.Styles.NormalDesc.Copy()
+	
+	// Create our custom delegate with bullet styling
+	bulletStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#25A065"))
+	delegate := CustomDelegate{
+		DefaultDelegate: defaultDelegate,
+		bulletStyle:     bulletStyle,
+	}
+	// Set spacing to 0 to make the list more compact
+	delegate.SetSpacing(0)
 
 	l := list.New([]list.Item{}, delegate, 0, 0)
 	l.Title = "YouTube Subscriptions"
