@@ -33,9 +33,11 @@ type Item struct {
 	video youtube.Video
 }
 
-// FilterValue implements list.Item interface
+// FilterValue returns the value to filter on
 func (i Item) FilterValue() string {
-	return i.video.Title
+	// Combine title and channel name for filtering with channel name repeated
+	// to give it more weight in the search
+	return i.video.Title + " " + i.video.ChannelName + " " + i.video.ChannelName
 }
 
 // Title returns the item title
