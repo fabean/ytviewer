@@ -144,10 +144,10 @@ func (m SubscriptionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 			
 		case "b":
-			// Return to main view
-			return NewModel(m.youtubeClient), tea.Batch(
-				func() tea.Msg { return loadMainViewMsg{} },
-			)
+			// Return to main view with a specific message
+			return m, func() tea.Msg {
+				return returnToMainMsg{}
+			}
 
 		case "a":
 			// Enter add mode
@@ -410,4 +410,6 @@ type unsubscribedMsg struct {
 	channelID string
 }
 
-type loadMainViewMsg struct{} 
+type loadMainViewMsg struct{}
+
+type returnToMainMsg struct{} 

@@ -87,6 +87,7 @@ func NewModel(client *youtube.Client) Model {
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 
+	// Create a default delegate without trying to override the Render function
 	delegate := list.NewDefaultDelegate()
 	delegate.Styles.SelectedTitle = selectedItemStyle
 	delegate.Styles.SelectedDesc = selectedItemStyle
@@ -144,7 +145,7 @@ func (m Model) Init() tea.Cmd {
 // fetchVideos fetches videos from YouTube
 func (m Model) fetchVideos() tea.Cmd {
 	return func() tea.Msg {
-		// Updated call without parameters
+		// Get videos from the YouTube client
 		videos, err := m.youtubeClient.GetLatestVideos()
 		if err != nil {
 			return errMsg{err}
@@ -215,6 +216,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		cmds = append(cmds, cmd)
+
+	case returnToMainMsg:
+		// Reset the model to loading state
+		m.loading = true
+		return m, tea.Batch(
+			m.spinner.Tick,
+			m.fetchVideos(),
+		)
 	}
 
 	var cmd tea.Cmd
@@ -259,4 +268,16 @@ type errMsg struct {
 
 func (e errMsg) Error() string {
 	return e.err.Error()
+}
+
+// Add a new method to handle returning from subscription manager
+func (m Model) ReturnFromSubscriptions() tea.Cmd {
+	// Reset the model to loading state
+	m.loading = true
+	
+	// Return commands to start the spinner and fetch videos
+	return tea.Batch(
+		m.spinner.Tick,
+		m.fetchVideos(),
+	)
 } 
