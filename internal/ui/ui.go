@@ -118,6 +118,10 @@ func NewModel(client *youtube.Client) Model {
 				key.WithKeys("enter"),
 				key.WithHelp("enter", "play video"),
 			),
+			key.NewBinding(
+				key.WithKeys("r"),
+				key.WithHelp("r", "reload videos"),
+			),
 		}
 	}
 
@@ -169,6 +173,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Switch to subscription manager
 			subModel := NewSubscriptionModel(m.youtubeClient)
 			return subModel, subModel.Init()
+
+		case key.Matches(msg, key.NewBinding(key.WithKeys("r"))):
+			// Reload videos
+			m.loading = true
+			return m, tea.Batch(
+				m.spinner.Tick,
+				m.fetchVideos(),
+			)
 
 		case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
 			if m.list.SelectedItem() != nil {

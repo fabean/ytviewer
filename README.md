@@ -80,6 +80,7 @@ ytviewer
 - `↑`/`↓`: Navigate through videos
 - `Enter`: Play selected video in MPV
 - `s`: Open subscription management screen
+- `r`: Reload videos from subscribed channels
 - `q`: Quit the application
 
 ### Managing Subscriptions
