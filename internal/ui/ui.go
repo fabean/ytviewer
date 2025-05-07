@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -27,6 +28,8 @@ type Model struct {
 	err          error
 	width        int
 	height       int
+	notification string
+	notificationTimer int
 }
 
 // Item represents a video in the list
@@ -193,6 +196,10 @@ func NewModel(client *youtube.Client) Model {
 				key.WithKeys("f"),
 				key.WithHelp("f", "force reload (clear cache)"),
 			),
+			key.NewBinding(
+				key.WithKeys("c"),
+				key.WithHelp("c", "copy video URL"),
+			),
 		}
 	}
 
@@ -201,6 +208,8 @@ func NewModel(client *youtube.Client) Model {
 		youtubeClient: client,
 		loading:      true,
 		spinner:      s,
+		notification: "",
+		notificationTimer: 0,
 	}
 }
 
@@ -265,19 +274,43 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
 			if m.list.SelectedItem() != nil {
 				selectedItem := m.list.SelectedItem().(Item)
-				return m, func() tea.Msg {
-					// Mark the video as watched before playing it
-					err := m.youtubeClient.MarkVideoAsWatched(selectedItem.video.ID)
-					if err != nil {
-						return errMsg{err}
-					}
-					
-					err = m.youtubeClient.PlayVideo(selectedItem.video.ID)
-					if err != nil {
-						return errMsg{err}
-					}
-					return videoWatchedMsg{videoID: selectedItem.video.ID}
-				}
+				
+				// Show notification immediately
+				m.notification = "Launching video..."
+				m.notificationTimer = 3
+				
+				return m, tea.Batch(
+					func() tea.Msg {
+						// Mark the video as watched before playing it
+						err := m.youtubeClient.MarkVideoAsWatched(selectedItem.video.ID)
+						if err != nil {
+							return errMsg{err}
+						}
+						
+						err = m.youtubeClient.PlayVideo(selectedItem.video.ID)
+						if err != nil {
+							return errMsg{err}
+						}
+						return videoWatchedMsg{videoID: selectedItem.video.ID}
+					},
+					tea.Tick(time.Second, func(time.Time) tea.Msg {
+						return tickMsg{}
+					}),
+				)
+			}
+
+		case key.Matches(msg, key.NewBinding(key.WithKeys("c"))):
+			if m.list.SelectedItem() != nil {
+				selectedItem := m.list.SelectedItem().(Item)
+				return m, tea.Batch(
+					func() tea.Msg {
+						err := m.youtubeClient.CopyVideoURLToClipboard(selectedItem.video.ID)
+						if err != nil {
+							return errMsg{err}
+						}
+						return clipboardMsg{message: "URL copied to clipboard"}
+					},
+				)
 			}
 		}
 
@@ -330,6 +363,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 		}
+
+	case clipboardMsg:
+		m.notification = msg.message
+		m.notificationTimer = 3 // Show for 3 seconds
+		return m, tea.Tick(time.Second, func(time.Time) tea.Msg {
+			return tickMsg{}
+		})
+
+	case tickMsg:
+		if m.notificationTimer > 0 {
+			m.notificationTimer--
+			if m.notificationTimer == 0 {
+				m.notification = ""
+				return m, nil
+			}
+			return m, tea.Tick(time.Second, func(time.Time) tea.Msg {
+				return tickMsg{}
+			})
+		}
 	}
 
 	var cmd tea.Cmd
@@ -341,12 +393,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View renders the UI
 func (m Model) View() string {
+	// Create the base view first
+	var baseView string
+	
 	if m.err != nil {
-		return fmt.Sprintf("Error: %v\nPress q to quit.", m.err)
-	}
-
-	if m.loading {
-		return lipgloss.Place(
+		baseView = fmt.Sprintf("Error: %v\nPress q to quit.", m.err)
+	} else if m.loading {
+		baseView = lipgloss.Place(
 			m.width,
 			m.height,
 			lipgloss.Center,
@@ -358,9 +411,41 @@ func (m Model) View() string {
 				"Press q to quit",
 			),
 		)
+	} else {
+		baseView = m.list.View()
 	}
-
-	return listStyle.Render(m.list.View())
+	
+	// Add notification as a floating overlay if present
+	if m.notification != "" {
+		notificationStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(lipgloss.Color("#336699")).
+			Bold(true).
+			Padding(0, 1).
+			Align(lipgloss.Center)
+		
+		notification := notificationStyle.Render(m.notification)
+		
+		// Split the base view into lines
+		lines := strings.Split(baseView, "\n")
+		
+		// Add notification to the first line
+		if len(lines) > 0 {
+			// Calculate position to right-align the notification
+			firstLineWidth := lipgloss.Width(lines[0])
+			padding := m.width - firstLineWidth - lipgloss.Width(notification)
+			if padding < 0 {
+				padding = 0
+			}
+			
+			lines[0] = lines[0] + strings.Repeat(" ", padding) + notification
+		}
+		
+		// Rejoin the lines
+		return strings.Join(lines, "\n")
+	}
+	
+	return baseView
 }
 
 // Message types
@@ -392,3 +477,11 @@ func (m Model) ReturnFromSubscriptions() tea.Cmd {
 type videoWatchedMsg struct {
 	videoID string
 }
+
+// Add a new message type for clipboard operations
+type clipboardMsg struct {
+	message string
+}
+
+// Add a new message type for timer ticks
+type tickMsg struct{}

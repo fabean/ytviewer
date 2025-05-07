@@ -12,6 +12,8 @@ ytviewer is a terminal-based YouTube subscription viewer built in Go using the B
 - Navigate your subscriptions with a simple keyboard interface
 - Manage your subscriptions directly through the TUI
 - Filter videos by title or channel name
+- Track watched videos with persistent history
+- Copy video URLs to clipboard
 
 ## Installation
 
@@ -83,7 +85,7 @@ To find a channel ID:
 1. Go to the YouTube channel page
 2. View the page source (right-click > "View Page Source")
 3. Search for "channelId"
-4. The ID will look like "UC0intLFzLaudFG-xAvUEO-A"
+4. The ID will look like "UCuAXFkgsw1L7xaCfnd5JJOw"
 
 Alternatively, use a service like [Comment Picker](https://commentpicker.com/youtube-channel-id.php) to find channel IDs.
 
@@ -100,6 +102,7 @@ ytviewer
 - `/`: Filter videos (by title or channel name)
 - `↑`/`↓`: Navigate through videos
 - `Enter`: Play selected video in MPV
+- `c`: Copy current video URL to clipboard
 - `s`: Open subscription management screen
 - `r`: Reload videos (uses cache if valid)
 - `f`: Force reload videos (clears cache)
@@ -141,6 +144,8 @@ The cache duration is configurable in your config file using the `cache_duration
 - Manage subscriptions directly through the TUI
 - Filter videos by title or channel name
 - Caching to reduce API usage
+- Persistent watch history tracking
+- Copy video URLs to clipboard
 
 ## Notes
 

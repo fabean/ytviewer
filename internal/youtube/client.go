@@ -14,6 +14,7 @@ import (
 	"google.golang.org/api/option"
 	"google.golang.org/api/youtube/v3"
 	"github.com/google/uuid"
+	"github.com/atotto/clipboard"
 )
 
 // Video represents a YouTube video
@@ -694,4 +695,10 @@ func (c *Client) IsVideoWatched(videoID string) (bool, error) {
 	}
 	
 	return watchedVideos[videoID], nil
+}
+
+// CopyVideoURLToClipboard copies the video URL to the system clipboard
+func (c *Client) CopyVideoURLToClipboard(videoID string) error {
+	url := fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoID)
+	return clipboard.WriteAll(url)
 } 
