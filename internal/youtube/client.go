@@ -166,6 +166,14 @@ func (c *Client) PlayVideo(videoID string) error {
 		fmt.Printf("Error starting MPV: %v\n", err)
 	}
 	
+	// If configured to mark videos as watched automatically
+	if c.mpvOptions.MarkAsWatched {
+		// Mark the video as watched
+		if markErr := c.MarkVideoAsWatched(videoID); markErr != nil {
+			fmt.Printf("Error marking video as watched: %v\n", markErr)
+		}
+	}
+	
 	return err
 }
 
@@ -595,4 +603,95 @@ func (c *Client) GetChannelNamesForIDs(channelIDs []string) (map[string]string, 
 func (c *Client) ClearVideoCache() {
 	c.videoCache = make(map[string][]Video)
 	c.lastFetchTime = time.Time{} // Zero time
+}
+
+// MarkVideoAsWatched marks a video as watched and saves to persistent storage
+func (c *Client) MarkVideoAsWatched(videoID string) error {
+	watchedVideos, err := c.GetWatchedVideos()
+	if err != nil {
+		return err
+	}
+	
+	// Mark as watched
+	watchedVideos[videoID] = true
+	
+	// Save to file
+	return c.saveWatchedVideos(watchedVideos)
+}
+
+// GetWatchedVideos returns a map of video IDs that have been watched
+func (c *Client) GetWatchedVideos() (map[string]bool, error) {
+	watchedVideos := make(map[string]bool)
+	
+	// Get the watched videos file path
+	watchedPath, err := c.getWatchedVideosPath()
+	if err != nil {
+		return watchedVideos, err
+	}
+	
+	// Check if file exists
+	if _, err := os.Stat(watchedPath); os.IsNotExist(err) {
+		// File doesn't exist yet, return empty map
+		return watchedVideos, nil
+	}
+	
+	// Read the file
+	data, err := os.ReadFile(watchedPath)
+	if err != nil {
+		return watchedVideos, err
+	}
+	
+	// Parse JSON
+	if len(data) > 0 {
+		err = json.Unmarshal(data, &watchedVideos)
+		if err != nil {
+			return watchedVideos, err
+		}
+	}
+	
+	return watchedVideos, nil
+}
+
+// saveWatchedVideos saves the watched videos map to a file
+func (c *Client) saveWatchedVideos(watchedVideos map[string]bool) error {
+	// Get the watched videos file path
+	watchedPath, err := c.getWatchedVideosPath()
+	if err != nil {
+		return err
+	}
+	
+	// Ensure directory exists
+	dir := filepath.Dir(watchedPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	
+	// Marshal to JSON
+	data, err := json.MarshalIndent(watchedVideos, "", "  ")
+	if err != nil {
+		return err
+	}
+	
+	// Write to file
+	return os.WriteFile(watchedPath, data, 0644)
+}
+
+// getWatchedVideosPath returns the path to the watched videos file
+func (c *Client) getWatchedVideosPath() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	
+	return filepath.Join(homeDir, ".config", "ytviewer", "watched.json"), nil
+}
+
+// IsVideoWatched checks if a video has been watched
+func (c *Client) IsVideoWatched(videoID string) (bool, error) {
+	watchedVideos, err := c.GetWatchedVideos()
+	if err != nil {
+		return false, err
+	}
+	
+	return watchedVideos[videoID], nil
 } 

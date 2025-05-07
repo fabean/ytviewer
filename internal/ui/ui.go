@@ -32,6 +32,7 @@ type Model struct {
 // Item represents a video in the list
 type Item struct {
 	video youtube.Video
+	watched bool
 }
 
 // FilterValue returns the value to filter on
@@ -112,6 +113,13 @@ func (d CustomDelegate) Render(w io.Writer, m list.Model, index int, listItem li
 	} else {
 		title = d.Styles.NormalTitle.Render(title)
 	}
+	
+	// Add watched indicator if the video has been watched
+	if item.watched {
+		watchedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+		title = title + " " + watchedStyle.Render("✓")
+	}
+	
 	fmt.Fprintln(w, title)
 	
 	// Render description with proper indentation and styling
@@ -258,11 +266,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.list.SelectedItem() != nil {
 				selectedItem := m.list.SelectedItem().(Item)
 				return m, func() tea.Msg {
-					err := m.youtubeClient.PlayVideo(selectedItem.video.ID)
+					// Mark the video as watched before playing it
+					err := m.youtubeClient.MarkVideoAsWatched(selectedItem.video.ID)
 					if err != nil {
 						return errMsg{err}
 					}
-					return nil
+					
+					err = m.youtubeClient.PlayVideo(selectedItem.video.ID)
+					if err != nil {
+						return errMsg{err}
+					}
+					return videoWatchedMsg{videoID: selectedItem.video.ID}
 				}
 			}
 		}
@@ -271,10 +285,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.videos = msg.videos
 		m.loading = false
 		
+		// Get watched videos
+		watchedVideos, err := m.youtubeClient.GetWatchedVideos()
+		if err != nil {
+			m.err = err
+			m.loading = false
+			break
+		}
+		
 		// Convert videos to list items
 		items := make([]list.Item, len(m.videos))
 		for i, video := range m.videos {
-			items[i] = Item{video: video}
+			// Check if this video is in the watched list
+			watched := watchedVideos[video.ID]
+			items[i] = Item{video: video, watched: watched}
 		}
 		
 		m.list.SetItems(items)
@@ -295,6 +319,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.spinner.Tick,
 			m.fetchVideos(),
 		)
+
+	case videoWatchedMsg:
+		// Update the watched status in the list
+		for i, item := range m.list.Items() {
+			videoItem, ok := item.(Item)
+			if ok && videoItem.video.ID == msg.videoID {
+				videoItem.watched = true
+				m.list.SetItem(i, videoItem)
+				break
+			}
+		}
 	}
 
 	var cmd tea.Cmd
@@ -351,4 +386,9 @@ func (m Model) ReturnFromSubscriptions() tea.Cmd {
 		m.spinner.Tick,
 		m.fetchVideos(),
 	)
+}
+
+// Add a new message type for when a video is watched
+type videoWatchedMsg struct {
+	videoID string
 }
