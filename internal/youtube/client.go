@@ -1,6 +1,7 @@
 package youtube
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -701,4 +702,76 @@ func (c *Client) IsVideoWatched(videoID string) (bool, error) {
 func (c *Client) CopyVideoURLToClipboard(videoID string) error {
 	url := fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoID)
 	return clipboard.WriteAll(url)
+}
+
+// DownloadVideo downloads the video using yt-dlp
+func (c *Client) DownloadVideo(videoID string) error {
+	// Create downloads directory if it doesn't exist
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("error getting home directory: %w", err)
+	}
+
+	outputDir := filepath.Join(homeDir, "Downloads", "ytviewer")
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return fmt.Errorf("error creating output directory: %w", err)
+	}
+
+	url := fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoID)
+
+	// Prepare yt-dlp command with best quality and progress output
+	args := []string{
+		"--format", "bestvideo+bestaudio/best",
+		"--output", filepath.Join(outputDir, "%(title)s.%(ext)s"),
+		"--newline", // Ensure each progress update is on a new line
+		"--progress-template", "%(progress._percent_str)s",
+		url,
+	}
+
+	cmd := exec.Command("yt-dlp", args...)
+
+	// Create a pipe for capturing stdout
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("error creating stdout pipe: %w", err)
+	}
+
+	// Create a pipe for capturing stderr
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("error creating stderr pipe: %w", err)
+	}
+
+	// Start the command
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("error starting yt-dlp: %w", err)
+	}
+
+	// Read stderr in a goroutine to prevent blocking
+	go func() {
+		scanner := bufio.NewScanner(stderrPipe)
+		for scanner.Scan() {
+			// Ignore stderr output
+		}
+	}()
+
+	// Read stdout and update progress
+	scanner := bufio.NewScanner(stdoutPipe)
+	for scanner.Scan() {
+		line := scanner.Text()
+		// Only print if it's a progress percentage
+		if strings.HasSuffix(line, "%") {
+			fmt.Printf("\rDownloading: %s", line)
+		}
+	}
+
+	// Wait for the command to complete
+	if err := cmd.Wait(); err != nil {
+		return fmt.Errorf("error during download: %w", err)
+	}
+
+	// Clear the progress line
+	fmt.Print("\r")
+
+	return nil
 } 

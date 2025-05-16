@@ -21,6 +21,7 @@ ytviewer is a terminal-based YouTube subscription viewer built in Go using the B
 
 - Go 1.16 or higher
 - MPV media player
+- yt-dlp (for video downloads)
 - YouTube API key
 
 ### Building from source
@@ -103,6 +104,7 @@ ytviewer
 - `↑`/`↓`: Navigate through videos
 - `Enter`: Play selected video in MPV
 - `c`: Copy current video URL to clipboard
+- `D`: Download current video using yt-dlp
 - `s`: Open subscription management screen
 - `r`: Reload videos (uses cache if valid)
 - `f`: Force reload videos (clears cache)
@@ -146,6 +148,7 @@ The cache duration is configurable in your config file using the `cache_duration
 - Caching to reduce API usage
 - Persistent watch history tracking
 - Copy video URLs to clipboard
+- Download videos using yt-dlp in best quality
 
 ## Notes
 

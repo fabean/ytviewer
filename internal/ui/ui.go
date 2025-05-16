@@ -200,6 +200,10 @@ func NewModel(client *youtube.Client) Model {
 				key.WithKeys("c"),
 				key.WithHelp("c", "copy video URL"),
 			),
+			key.NewBinding(
+				key.WithKeys("D"),
+				key.WithHelp("D", "download video"),
+			),
 		}
 	}
 
@@ -312,6 +316,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					},
 				)
 			}
+
+		case key.Matches(msg, key.NewBinding(key.WithKeys("D"))):
+			if m.list.SelectedItem() != nil {
+				selectedItem := m.list.SelectedItem().(Item)
+				return m, tea.Batch(
+					func() tea.Msg {
+						err := m.youtubeClient.DownloadVideo(selectedItem.video.ID)
+						if err != nil {
+							return errMsg{err}
+						}
+						return downloadMsg{message: "Video downloaded successfully"}
+					},
+				)
+			}
 		}
 
 	case videosMsg:
@@ -365,6 +383,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case clipboardMsg:
+		m.notification = msg.message
+		m.notificationTimer = 3 // Show for 3 seconds
+		return m, tea.Tick(time.Second, func(time.Time) tea.Msg {
+			return tickMsg{}
+		})
+
+	case downloadMsg:
 		m.notification = msg.message
 		m.notificationTimer = 3 // Show for 3 seconds
 		return m, tea.Tick(time.Second, func(time.Time) tea.Msg {
@@ -485,3 +510,8 @@ type clipboardMsg struct {
 
 // Add a new message type for timer ticks
 type tickMsg struct{}
+
+// Add a new message type for download operations
+type downloadMsg struct {
+	message string
+}
